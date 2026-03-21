@@ -2,15 +2,26 @@
 Description=Router Outage Heartbeat Monitor
 After=network-online.target
 Wants=network-online.target
+# Circuit breaker: stop trying if it crashes 5 times in 60 seconds.
+StartLimitIntervalSec=60s
+StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/node /home/%u/code/router-outage-heartbeat/dist/index.js
+ExecStart=/usr/bin/node %h/code/router-outage-heartbeat/dist/index.js
 Restart=on-failure
 RestartSec=5s
 Environment=NODE_ENV=production
+StandardInput=null
 StandardOutput=null
 StandardError=journal
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/router-outage-heartbeat
+RestrictAddressFamilies=AF_INET AF_INET6
 
 [Install]
 WantedBy=default.target

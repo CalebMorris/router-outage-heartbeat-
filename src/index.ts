@@ -2,12 +2,13 @@ import { CONFIG } from './config';
 import { probeEndpoint } from './pinger';
 import { EndpointRotator } from './rotator';
 import { StateMachine } from './state-machine';
-import { initLogger, logEvent } from './logger';
+import { initLogger, logEvent, reopenLog } from './logger';
 
 const rotator = new EndpointRotator(CONFIG.endpoints);
 const machine = new StateMachine(CONFIG);
 
 let shuttingDown = false;
+// Track the probe timestamp of the first failure to accurately record outage start.
 let outageStartedAt: string | null = null;
 
 async function tick(): Promise<void> {
@@ -26,15 +27,17 @@ async function tick(): Promise<void> {
 
   if (transition !== null) {
     if (transition.to === 'outage') {
-      outageStartedAt = transition.at;
+      // Use the probe's own timestamp so outage_start reflects when the failure was
+      // observed, not when the state machine evaluated it.
+      outageStartedAt = result.timestamp;
       logEvent({
         event: 'outage_start',
         host: result.host,
         port: result.port,
-        outageStartedAt: transition.at,
+        outageStartedAt,
       });
     } else if (transition.from === 'outage' && outageStartedAt !== null) {
-      const outageEndedAt = transition.at;
+      const outageEndedAt = result.timestamp;
       const durationMs = new Date(outageEndedAt).getTime() - new Date(outageStartedAt).getTime();
       logEvent({
         event: 'outage_end',
@@ -59,6 +62,8 @@ function shutdown(reason: string): void {
 
 process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 process.on('SIGINT', () => { shutdown('SIGINT'); });
+// SIGHUP: reopen the log file after logrotate has rotated it.
+process.on('SIGHUP', () => { reopenLog(); });
 
 initLogger(CONFIG.logPath);
 

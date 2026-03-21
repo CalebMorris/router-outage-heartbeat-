@@ -52,7 +52,7 @@ export class StateMachine {
         from: prevState,
         to: this.state,
         triggeredBy: result,
-        at: new Date().toISOString(),
+        at: result.timestamp,
       };
     }
 

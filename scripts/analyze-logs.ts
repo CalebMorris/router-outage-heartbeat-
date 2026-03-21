@@ -56,7 +56,12 @@ function parseArgs(): { logPath: string; since: Date | null; format: 'text' | 'c
     if (args[i] === '--log' && args[i + 1]) {
       logPath = args[++i];
     } else if (args[i] === '--since' && args[i + 1]) {
-      since = new Date(args[++i]);
+      const parsed = new Date(args[++i]);
+      if (isNaN(parsed.getTime())) {
+        console.error(`Invalid --since date: "${args[i]}". Expected ISO format, e.g. 2026-03-01`);
+        process.exit(1);
+      }
+      since = parsed;
     } else if (args[i] === '--format' && args[i + 1]) {
       const f = args[++i];
       if (f === 'csv' || f === 'text') format = f;
@@ -69,8 +74,12 @@ function parseArgs(): { logPath: string; since: Date | null; format: 'text' | 'c
   return { logPath, since, format, mode };
 }
 
-async function readEntries(logPath: string, since: Date | null): Promise<LogEntry[]> {
+async function readEntries(
+  logPath: string,
+  since: Date | null,
+): Promise<{ entries: LogEntry[]; skippedLines: number }> {
   const entries: LogEntry[] = [];
+  let skippedLines = 0;
 
   if (!fs.existsSync(logPath)) {
     console.error(`Log file not found: ${logPath}`);
@@ -89,11 +98,12 @@ async function readEntries(logPath: string, since: Date | null): Promise<LogEntr
       if (since && new Date(entry.time) < since) continue;
       entries.push(entry);
     } catch {
-      // skip malformed lines (e.g., logrotate boundary corruption)
+      // Skip malformed lines (e.g. logrotate boundary corruption or mid-write crash).
+      skippedLines++;
     }
   }
 
-  return entries;
+  return { entries, skippedLines };
 }
 
 function formatDuration(ms: number): string {
@@ -156,12 +166,18 @@ function printSummaryMode(entries: LogEntry[], format: 'text' | 'csv'): void {
   const outages: OutageRecord[] = [];
   const startMap = new Map<string, string>();
 
+  let orphanedEnds = 0;
+
   for (const entry of entries) {
     if (entry.event === 'outage_start') {
       const e = entry as OutageStartEntry;
       startMap.set(e.outageStartedAt, e.outageStartedAt);
     } else if (entry.event === 'outage_end') {
       const e = entry as OutageEndEntry;
+      if (!startMap.has(e.outageStartedAt)) {
+        // Start event is before the filter window or in a prior rotated log.
+        orphanedEnds++;
+      }
       outages.push({
         startedAt: e.outageStartedAt,
         endedAt: e.outageEndedAt,
@@ -174,6 +190,13 @@ function printSummaryMode(entries: LogEntry[], format: 'text' | 'csv'): void {
   // Any outage_start without matching outage_end (ongoing)
   for (const [startedAt] of startMap) {
     outages.push({ startedAt, endedAt: null, durationMs: null });
+  }
+
+  if (orphanedEnds > 0) {
+    console.error(
+      `Warning: ${orphanedEnds} outage_end event(s) have no matching outage_start in this log window.` +
+      ` Their start events may be in a rotated log or before the --since filter.`,
+    );
   }
 
   outages.sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
@@ -235,7 +258,11 @@ function printSummaryMode(entries: LogEntry[], format: 'text' | 'csv'): void {
 
 async function main(): Promise<void> {
   const { logPath, since, format, mode } = parseArgs();
-  const entries = await readEntries(logPath, since);
+  const { entries, skippedLines } = await readEntries(logPath, since);
+
+  if (skippedLines > 0) {
+    console.error(`Warning: ${skippedLines} malformed line(s) skipped (logrotate boundary corruption or mid-write crash).`);
+  }
 
   if (mode === 'request') {
     printRequestMode(entries, format);

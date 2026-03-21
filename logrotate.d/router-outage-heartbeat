@@ -4,5 +4,12 @@
     compress
     delaycompress
     missingok
-    copytruncate
+    notifempty
+    dateext
+    create 0640
+    postrotate
+        # Send SIGHUP so the process reopens the log file after rotation.
+        # Matches specifically against the dist path to avoid signaling other node processes.
+        pkill -HUP -f "router-outage-heartbeat/dist/index.js" 2>/dev/null || true
+    endscript
 }

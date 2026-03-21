@@ -40,19 +40,37 @@ export interface ShutdownEvent {
 export type LogEvent = ProbeEvent | OutageStartEvent | OutageEndEvent | StartupEvent | ShutdownEvent;
 
 let logger: pino.Logger;
+let productionStream: ReturnType<typeof pino.destination> | null = null;
 
 export function initLogger(logPath: string): void {
   const isProduction = process.env['NODE_ENV'] === 'production';
 
   if (isProduction) {
     const dir = path.dirname(logPath);
-    fs.mkdirSync(dir, { recursive: true });
-    const stream = pino.destination({ dest: logPath, sync: false });
-    logger = pino({ timestamp: pino.stdTimeFunctions.isoTime }, stream);
+    try {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
+    } catch (err) {
+      process.stderr.write(`Failed to create log directory ${dir}: ${String(err)}\n`);
+      process.exit(1);
+    }
+    try {
+      productionStream = pino.destination({ dest: logPath, sync: true });
+      logger = pino({ timestamp: pino.stdTimeFunctions.isoTime }, productionStream);
+    } catch (err) {
+      process.stderr.write(`Failed to open log file ${logPath}: ${String(err)}\n`);
+      process.exit(1);
+    }
   } else {
     logger = pino({
       timestamp: pino.stdTimeFunctions.isoTime,
     });
+  }
+}
+
+// Called on SIGHUP so logrotate can mv the file and we reopen a fresh handle.
+export function reopenLog(): void {
+  if (productionStream) {
+    productionStream.reopen();
   }
 }
 
