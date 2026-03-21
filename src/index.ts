@@ -25,28 +25,45 @@ async function tick(): Promise<void> {
     state: machine.getState(),
   });
 
-  if (transition !== null) {
-    if (transition.to === 'outage') {
-      // Use the probe's own timestamp so outage_start reflects when the failure was
-      // observed, not when the state machine evaluated it.
-      outageStartedAt = result.timestamp;
+  if (transition !== null && transition.to === 'bulkhead') {
+    // First failure detected — immediately blast all endpoints to confirm outage.
+    const firstFailureTimestamp = result.timestamp;
+    const bulkheadResults = await Promise.all(
+      CONFIG.endpoints.map((e) => probeEndpoint(e.host, e.port, CONFIG.pingTimeoutMs)),
+    );
+    const failedCount = bulkheadResults.filter((r) => !r.success).length;
+    const majorityFailed = failedCount > CONFIG.endpoints.length / 2;
+    const checkedAt = new Date().toISOString();
+
+    logEvent({
+      event: 'bulkhead_check',
+      totalEndpoints: CONFIG.endpoints.length,
+      failedCount,
+      majorityFailed,
+    });
+
+    const bulkheadTransition = machine.processBulkheadResult(majorityFailed, checkedAt);
+
+    if (bulkheadTransition.to === 'outage') {
+      outageStartedAt = firstFailureTimestamp;
       logEvent({
         event: 'outage_start',
         host: result.host,
         port: result.port,
         outageStartedAt,
       });
-    } else if (transition.from === 'outage' && outageStartedAt !== null) {
-      const outageEndedAt = result.timestamp;
-      const durationMs = new Date(outageEndedAt).getTime() - new Date(outageStartedAt).getTime();
-      logEvent({
-        event: 'outage_end',
-        durationMs,
-        outageStartedAt,
-        outageEndedAt,
-      });
-      outageStartedAt = null;
     }
+    // If bulkheadTransition.to === 'normal': false alarm, no outage event needed.
+  } else if (transition !== null && transition.from === 'outage' && outageStartedAt !== null) {
+    const outageEndedAt = result.timestamp;
+    const durationMs = new Date(outageEndedAt).getTime() - new Date(outageStartedAt).getTime();
+    logEvent({
+      event: 'outage_end',
+      durationMs,
+      outageStartedAt,
+      outageEndedAt,
+    });
+    outageStartedAt = null;
   }
 
   if (!shuttingDown) {

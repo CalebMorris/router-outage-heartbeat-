@@ -7,8 +7,10 @@ A background daemon that detects and logs internet outages for ISP reporting. It
 ## How it works
 
 - Probes external endpoints in round-robin on a regular interval
-- If consecutive probes fail, it declares an outage and switches to rapid polling
-- When enough consecutive probes succeed, it declares recovery and returns to normal intervals
+- On the first probe failure, enters **bulkhead mode**: immediately pings every endpoint in parallel
+- If a majority of those endpoints fail, declares an outage and switches to rapid polling
+- If a majority succeed, the single failure is treated as noise and normal polling resumes
+- When enough consecutive probes succeed after an outage, declares recovery and returns to normal intervals
 - All probe results and outage events are written as JSON to a log file
 
 ---
@@ -91,8 +93,9 @@ Each line is a JSON event. Event types:
 |---|---|
 | `startup` | Service started |
 | `shutdown` | Service stopped gracefully |
-| `probe` | Every ping attempt (includes `state: normal\|outage`) |
-| `outage_start` | Consecutive failures threshold reached |
+| `probe` | Every ping attempt (includes `state: normal\|bulkhead\|outage`) |
+| `bulkhead_check` | All endpoints blasted in parallel after first failure (includes `totalEndpoints`, `failedCount`, `majorityFailed`) |
+| `outage_start` | Bulkhead check confirmed majority of endpoints unreachable |
 | `outage_end` | Consecutive successes threshold reached after an outage (includes `durationMs`) |
 
 ---
@@ -146,12 +149,11 @@ npm run build && npm run service:restart
 |---|---|---|
 | `normalIntervalMs` | ms | Probe interval during normal operation |
 | `outageIntervalMs` | ms | Probe interval during an outage |
-| `consecutiveFailuresForOutage` | count | Failures required to declare outage |
 | `consecutiveSuccessesForRecovery` | count | Successes required to declare recovery |
 | `pingTimeoutMs` | ms | Per-probe TCP timeout |
 | `endpoints` | list | Endpoints to probe in round-robin |
 
-**To test outage detection without unplugging:** temporarily add `{ host: 'localhost', port: 9999 }` to the endpoints list, rebuild, and restart. Two consecutive failures will trigger outage mode. Remove it and restart when done.
+**To test outage detection without unplugging:** temporarily replace most entries in `endpoints` with `{ host: 'localhost', port: 9999 }`, rebuild, and restart. The first probe failure will trigger a bulkhead check; since the majority of endpoints are unreachable, it will immediately declare an outage. Restore the original list and restart when done.
 
 ---
 

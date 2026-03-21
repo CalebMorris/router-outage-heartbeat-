@@ -9,7 +9,6 @@ export interface Endpoint {
 export interface Config {
   normalIntervalMs: number;
   outageIntervalMs: number;
-  consecutiveFailuresForOutage: number;
   consecutiveSuccessesForRecovery: number;
   pingTimeoutMs: number;
   endpoints: Endpoint[];
@@ -19,7 +18,6 @@ export interface Config {
 export const CONFIG: Config = {
   normalIntervalMs: 20_000,
   outageIntervalMs: 500,
-  consecutiveFailuresForOutage: 3,
   consecutiveSuccessesForRecovery: 5,
   pingTimeoutMs: 1_000,
   endpoints: [

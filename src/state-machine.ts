@@ -1,6 +1,6 @@
 import { PingResult } from './pinger';
 
-export type MonitorState = 'normal' | 'outage';
+export type MonitorState = 'normal' | 'bulkhead' | 'outage';
 
 export interface StateTransition {
   from: MonitorState;
@@ -11,52 +11,57 @@ export interface StateTransition {
 
 export class StateMachine {
   private state: MonitorState = 'normal';
-  private consecutiveFailures: number = 0;
   private consecutiveSuccesses: number = 0;
-  private readonly failuresRequired: number;
   private readonly successesRequired: number;
   private readonly normalIntervalMs: number;
   private readonly outageIntervalMs: number;
 
   constructor(config: {
-    consecutiveFailuresForOutage: number;
     consecutiveSuccessesForRecovery: number;
     normalIntervalMs: number;
     outageIntervalMs: number;
   }) {
-    this.failuresRequired = config.consecutiveFailuresForOutage;
     this.successesRequired = config.consecutiveSuccessesForRecovery;
     this.normalIntervalMs = config.normalIntervalMs;
     this.outageIntervalMs = config.outageIntervalMs;
   }
 
+  // Called for each rotating single-probe result.
+  // In 'normal': any failure immediately enters 'bulkhead'.
+  // In 'outage': successes accumulate toward recovery.
+  // In 'bulkhead': probe results are ignored — use processBulkheadResult instead.
   public process(result: PingResult): StateTransition | null {
-    if (result.success) {
-      this.consecutiveFailures = 0;
-      this.consecutiveSuccesses++;
-    } else {
+    if (this.state === 'normal' && !result.success) {
       this.consecutiveSuccesses = 0;
-      this.consecutiveFailures++;
+      this.state = 'bulkhead';
+      return { from: 'normal', to: 'bulkhead', triggeredBy: result, at: result.timestamp };
     }
 
-    const prevState = this.state;
+    if (this.state === 'outage') {
+      if (result.success) {
+        this.consecutiveSuccesses++;
+      } else {
+        this.consecutiveSuccesses = 0;
+      }
 
-    if (this.state === 'normal' && this.consecutiveFailures >= this.failuresRequired) {
-      this.state = 'outage';
-    } else if (this.state === 'outage' && this.consecutiveSuccesses >= this.successesRequired) {
-      this.state = 'normal';
-    }
-
-    if (this.state !== prevState) {
-      return {
-        from: prevState,
-        to: this.state,
-        triggeredBy: result,
-        at: result.timestamp,
-      };
+      if (this.consecutiveSuccesses >= this.successesRequired) {
+        this.consecutiveSuccesses = 0;
+        this.state = 'normal';
+        return { from: 'outage', to: 'normal', triggeredBy: result, at: result.timestamp };
+      }
     }
 
     return null;
+  }
+
+  // Called after blasting all endpoints during bulkhead check.
+  // majorityFailed = more than half of all endpoints failed.
+  public processBulkheadResult(majorityFailed: boolean, at: string): StateTransition {
+    const from: MonitorState = 'bulkhead';
+    const to: MonitorState = majorityFailed ? 'outage' : 'normal';
+    this.consecutiveSuccesses = 0;
+    this.state = to;
+    return { from, to, triggeredBy: { success: !majorityFailed, latencyMs: null, host: '', port: 0, timestamp: at }, at };
   }
 
   public getState(): MonitorState {
@@ -64,6 +69,7 @@ export class StateMachine {
   }
 
   public getIntervalMs(): number {
-    return this.state === 'outage' ? this.outageIntervalMs : this.normalIntervalMs;
+    if (this.state === 'outage') return this.outageIntervalMs;
+    return this.normalIntervalMs; // 'normal' and 'bulkhead' (transient)
   }
 }

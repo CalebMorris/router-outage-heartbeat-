@@ -32,12 +32,19 @@ export interface StartupEvent {
   config: Config;
 }
 
+export interface BulkheadCheckEvent {
+  event: 'bulkhead_check';
+  totalEndpoints: number;
+  failedCount: number;
+  majorityFailed: boolean;
+}
+
 export interface ShutdownEvent {
   event: 'shutdown';
   reason: string;
 }
 
-export type LogEvent = ProbeEvent | OutageStartEvent | OutageEndEvent | StartupEvent | ShutdownEvent;
+export type LogEvent = ProbeEvent | BulkheadCheckEvent | OutageStartEvent | OutageEndEvent | StartupEvent | ShutdownEvent;
 
 let logger: pino.Logger;
 let productionStream: ReturnType<typeof pino.destination> | null = null;
