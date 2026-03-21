@@ -30,3 +30,17 @@ journalctl --user -u router-outage-heartbeat -f
 npm run analyze                        # text report
 npm run analyze -- --format csv        # CSV for ISP
 npm run analyze -- --since 2026-03-01  # filtered range
+
+## Graph / Visualization
+npm run graph                          # static HTML file (heartbeat-graph.html in cwd)
+npm run graph -- --since 2026-03-01    # filtered range
+npm run graph -- --out /tmp/out.html   # custom output path
+npm run live                           # live mode: opens /tmp/heartbeat-live.html, regenerates every 60s
+
+## Scripts Architecture
+- All scripts in `scripts/` run via `ts-node` directly — they are NOT compiled by `tsc` (`tsconfig.json` only includes `src/**/*`)
+- Scripts redeclare their own local types rather than importing from `src/` to avoid pulling in pino and daemon code
+- ESLint enforces `@typescript-eslint/explicit-function-return-type: error` — every function (including callbacks) needs an explicit return type
+- `tsconfig.json` has `lib: ["ES2022"]` with no `"DOM"` — browser-side code lives only inside embedded HTML template strings and is never type-checked
+- Chart.js v4 + chartjs-adapter-date-fns v3 are loaded via CDN inside the HTML template; no local install
+- Scatter plot data points carry `host` and `port` fields alongside `x`/`y` so tooltips can show the endpoint

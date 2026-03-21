@@ -51,14 +51,17 @@ interface Args {
   since: Date | null;
   outPath: string;
   open: boolean;
+  live: boolean;
 }
 
 function parseArgs(): Args {
   const args = process.argv.slice(2);
   let logPath = DEFAULT_LOG_PATH;
   let since: Date | null = null;
-  let outPath = path.join(process.cwd(), 'heartbeat-graph.html');
+  let outPath = '';
   let open = false;
+  let live = false;
+  let explicitSince = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--log' && args[i + 1]) {
@@ -70,14 +73,25 @@ function parseArgs(): Args {
         process.exit(1);
       }
       since = parsed;
+      explicitSince = true;
     } else if (args[i] === '--out' && args[i + 1]) {
       outPath = args[++i];
     } else if (args[i] === '--open') {
       open = true;
+    } else if (args[i] === '--live') {
+      live = true;
     }
   }
 
-  return { logPath, since, outPath, open };
+  if (live) {
+    if (!explicitSince) since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    if (!outPath) outPath = '/tmp/heartbeat-live.html';
+    open = true;
+  } else {
+    if (!outPath) outPath = path.join(process.cwd(), 'heartbeat-graph.html');
+  }
+
+  return { logPath, since, outPath, open, live };
 }
 
 async function readEntries(
@@ -112,12 +126,12 @@ async function readEntries(
 }
 
 function buildDatasets(entries: LogEntry[]): {
-  successPoints: { x: string; y: number }[];
-  failurePoints: { x: string; y: number }[];
+  successPoints: { x: string; y: number; host: string; port: number }[];
+  failurePoints: { x: string; y: number; host: string; port: number }[];
   outageZones: OutageZone[];
 } {
-  const successPoints: { x: string; y: number }[] = [];
-  const failurePoints: { x: string; y: number }[] = [];
+  const successPoints: { x: string; y: number; host: string; port: number }[] = [];
+  const failurePoints: { x: string; y: number; host: string; port: number }[] = [];
   const outageZones: OutageZone[] = [];
   const pendingStarts = new Map<string, string>();
 
@@ -125,9 +139,9 @@ function buildDatasets(entries: LogEntry[]): {
     if (entry.event === 'probe') {
       const p = entry as ProbeEntry;
       if (p.success && p.latencyMs !== null) {
-        successPoints.push({ x: p.time, y: p.latencyMs });
+        successPoints.push({ x: p.time, y: p.latencyMs, host: p.host, port: p.port });
       } else if (!p.success) {
-        failurePoints.push({ x: p.time, y: 0 });
+        failurePoints.push({ x: p.time, y: 0, host: p.host, port: p.port });
       }
     } else if (entry.event === 'outage_start') {
       const e = entry as OutageStartEntry;
@@ -153,8 +167,9 @@ function buildHtml(params: {
   outageZones: OutageZone[];
   since: Date | null;
   generatedAt: string;
+  live: boolean;
 }): string {
-  const { successPoints, failurePoints, outageZones, since, generatedAt } = params;
+  const { successPoints, failurePoints, outageZones, since, generatedAt, live } = params;
   const sinceText = since ? `since ${since.toISOString().slice(0, 10)}` : 'all time';
   const totalProbes = successPoints.length + failurePoints.length;
   const emptyNotice = totalProbes === 0
@@ -164,13 +179,18 @@ function buildHtml(params: {
   const outageZonesJson = JSON.stringify(outageZones);
   const successJson = JSON.stringify(successPoints);
   const failureJson = JSON.stringify(failurePoints);
+  const metaRefresh = live ? `\n  <meta http-equiv="refresh" content="60">` : '';
+  const metaLine = live
+    ? `Live · last 24h · updated ${generatedAt.slice(11, 19)} UTC &middot; ${totalProbes.toLocaleString()} probes &middot; ${outageZones.length} outage(s)`
+    : `Generated: ${generatedAt} &middot; ${sinceText} &middot; ${totalProbes.toLocaleString()} probes &middot; ${outageZones.length} outage(s)`;
+  const title = live ? 'Heartbeat — Live' : `Heartbeat Graph — ${sinceText}`;
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Heartbeat Graph — ${sinceText}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">${metaRefresh}
+  <title>${title}</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
   <style>
@@ -184,7 +204,7 @@ function buildHtml(params: {
 </head>
 <body>
   <h1>Router Outage Heartbeat</h1>
-  <p class="meta">Generated: ${generatedAt} &middot; ${sinceText} &middot; ${totalProbes.toLocaleString()} probes &middot; ${outageZones.length} outage(s)</p>
+  <p class="meta">${metaLine}</p>
   ${emptyNotice}
   <div class="chart-container">
     <canvas id="chart"></canvas>
@@ -272,8 +292,9 @@ function buildHtml(params: {
           tooltip: {
             callbacks: {
               label: function(ctx) {
-                if (ctx.datasetIndex === 1) return 'Probe failed';
-                return ctx.parsed.y.toFixed(1) + ' ms';
+                const endpoint = ctx.raw.host + ':' + ctx.raw.port;
+                if (ctx.datasetIndex === 1) return endpoint + ' — failed';
+                return endpoint + ' — ' + ctx.parsed.y.toFixed(1) + ' ms';
               },
             },
           },
@@ -286,8 +307,7 @@ function buildHtml(params: {
 </html>`;
 }
 
-async function main(): Promise<void> {
-  const { logPath, since, outPath, open } = parseArgs();
+async function generate(logPath: string, since: Date | null, outPath: string, live: boolean): Promise<void> {
   const { entries, skippedLines } = await readEntries(logPath, since);
 
   if (skippedLines > 0) {
@@ -301,6 +321,7 @@ async function main(): Promise<void> {
     outageZones,
     since,
     generatedAt: new Date().toISOString(),
+    live,
   });
 
   try {
@@ -310,7 +331,12 @@ async function main(): Promise<void> {
     console.error(err);
     process.exit(1);
   }
+}
 
+async function main(): Promise<void> {
+  const { logPath, since, outPath, open, live } = parseArgs();
+
+  await generate(logPath, since, outPath, live);
   console.log(outPath);
 
   if (open) {
@@ -319,6 +345,16 @@ async function main(): Promise<void> {
     } catch {
       console.error('Warning: xdg-open failed — open the file manually in your browser.');
     }
+  }
+
+  if (live) {
+    console.log('Watching — regenerating every 60s. Press Ctrl+C to stop.');
+    setInterval((): void => {
+      const liveSince = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      generate(logPath, liveSince, outPath, true).catch((err: unknown) => {
+        console.error('Regeneration failed:', err);
+      });
+    }, 60_000);
   }
 }
 

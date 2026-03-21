@@ -10,6 +10,7 @@
     "lint": "eslint src scripts --ext .ts",
     "analyze": "ts-node scripts/analyze-logs.ts",
     "graph": "ts-node scripts/graph-logs.ts",
+    "live": "ts-node scripts/graph-logs.ts --live",
     "service:install": "bash scripts/install-service.sh",
     "service:start": "systemctl --user start router-outage-heartbeat",
     "service:stop": "systemctl --user stop router-outage-heartbeat",
