@@ -1,0 +1,16 @@
+[Unit]
+Description=Router Outage Heartbeat Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /home/%u/code/router-outage-heartbeat/dist/index.js
+Restart=on-failure
+RestartSec=5s
+Environment=NODE_ENV=production
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,8 @@
+/home/*/.local/share/router-outage-heartbeat/heartbeat.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    copytruncate
+}

@@ -1,0 +1,26 @@
+{
+  "name": "router-outage-heartbeat",
+  "version": "1.0.0",
+  "description": "Detects and logs internet outages for ISP reporting",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src scripts --ext .ts",
+    "analyze": "ts-node scripts/analyze-logs.ts"
+  },
+  "dependencies": {
+    "pino": "^9.0.0",
+    "tcp-ping": "^0.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pino": "^7.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  }
+}
