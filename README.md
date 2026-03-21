@@ -114,6 +114,26 @@ npm run analyze -- --since 2026-03-01        # Filter by date
 
 ---
 
+## Graphing outages
+
+Generate an interactive HTML chart showing latency over time with outage zones highlighted:
+
+```bash
+npm run graph                                    # Write heartbeat-graph.html to current directory
+npm run graph -- --since 2026-03-01              # Filter to data after a date
+npm run graph -- --out ~/Desktop/report.html     # Custom output path
+npm run graph -- --open                          # Auto-open in browser after generating
+```
+
+The chart shows:
+- **Blue dots** — successful probes with their TCP latency in ms
+- **Red × marks** — failed probes (plotted at 0 ms)
+- **Red shaded bands** — outage windows (outage_start → outage_end)
+
+Open the generated HTML file in any browser. No internet connection required to view it — Chart.js loads from CDN and the data is embedded inline.
+
+---
+
 ## Configuration
 
 All tunable values are in `src/config.ts`. After any change, rebuild and reinstall:
