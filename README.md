@@ -6,9 +6,9 @@ A background daemon that detects and logs internet outages for ISP reporting. It
 
 ## How it works
 
-- Probes 4 external endpoints in round-robin every 30 seconds
-- If 2 consecutive probes fail, it declares an outage and switches to probing every 2 seconds
-- When 3 consecutive probes succeed, it declares recovery and returns to 30-second intervals
+- Probes external endpoints in round-robin on a regular interval
+- If consecutive probes fail, it declares an outage and switches to rapid polling
+- When enough consecutive probes succeed, it declares recovery and returns to normal intervals
 - All probe results and outage events are written as JSON to a log file
 
 ---
@@ -92,8 +92,8 @@ Each line is a JSON event. Event types:
 | `startup` | Service started |
 | `shutdown` | Service stopped gracefully |
 | `probe` | Every ping attempt (includes `state: normal\|outage`) |
-| `outage_start` | 2 consecutive failures detected |
-| `outage_end` | 3 consecutive successes after an outage (includes `durationMs`) |
+| `outage_start` | Consecutive failures threshold reached |
+| `outage_end` | Consecutive successes threshold reached after an outage (includes `durationMs`) |
 
 ---
 
@@ -124,12 +124,12 @@ npm run build && npm run service:restart
 
 | Setting | Default | Description |
 |---|---|---|
-| `normalIntervalMs` | 30000 | Probe interval during normal operation |
-| `outageIntervalMs` | 2000 | Probe interval during an outage |
-| `consecutiveFailuresForOutage` | 2 | Failures required to declare outage |
-| `consecutiveSuccessesForRecovery` | 3 | Successes required to declare recovery |
-| `pingTimeoutMs` | 5000 | Per-probe TCP timeout |
-| `endpoints` | 4 external hosts | Endpoints to probe in round-robin |
+| `normalIntervalMs` | ms | Probe interval during normal operation |
+| `outageIntervalMs` | ms | Probe interval during an outage |
+| `consecutiveFailuresForOutage` | count | Failures required to declare outage |
+| `consecutiveSuccessesForRecovery` | count | Successes required to declare recovery |
+| `pingTimeoutMs` | ms | Per-probe TCP timeout |
+| `endpoints` | list | Endpoints to probe in round-robin |
 
 **To test outage detection without unplugging:** temporarily add `{ host: 'localhost', port: 9999 }` to the endpoints list, rebuild, and restart. Two consecutive failures will trigger outage mode. Remove it and restart when done.
 
