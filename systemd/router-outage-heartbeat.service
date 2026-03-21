@@ -8,7 +8,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/node %h/code/router-outage-heartbeat/dist/index.js
+ExecStart=%h/.nvm/versions/node/v25.6.0/bin/node %h/code/router-outage-heartbeat/dist/index.js
 Restart=on-failure
 RestartSec=5s
 Environment=NODE_ENV=production
@@ -16,12 +16,7 @@ StandardInput=null
 StandardOutput=null
 StandardError=journal
 
-# Hardening
 NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ReadWritePaths=%h/.local/share/router-outage-heartbeat
-RestrictAddressFamilies=AF_INET AF_INET6
 
 [Install]
 WantedBy=default.target

@@ -67,6 +67,9 @@ process.on('SIGHUP', () => { reopenLog(); });
 
 initLogger(CONFIG.logPath);
 
+const endpointList = CONFIG.endpoints.map((e) => `${e.host}:${e.port}`).join(', ');
+process.stderr.write(`router-outage-heartbeat starting — monitoring: ${endpointList}\n`);
+
 logEvent({
   event: 'startup',
   config: CONFIG,

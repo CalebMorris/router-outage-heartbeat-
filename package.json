@@ -8,7 +8,17 @@
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
     "lint": "eslint src scripts --ext .ts",
-    "analyze": "ts-node scripts/analyze-logs.ts"
+    "analyze": "ts-node scripts/analyze-logs.ts",
+    "service:install": "bash scripts/install-service.sh",
+    "service:start": "systemctl --user start router-outage-heartbeat",
+    "service:stop": "systemctl --user stop router-outage-heartbeat",
+    "service:restart": "systemctl --user restart router-outage-heartbeat",
+    "service:status": "systemctl --user status router-outage-heartbeat --no-pager",
+    "service:enable": "systemctl --user enable router-outage-heartbeat",
+    "service:disable": "systemctl --user disable router-outage-heartbeat",
+    "log:tail": "tail -f ~/.local/share/router-outage-heartbeat/heartbeat.log | jq .",
+    "log:journal": "journalctl --user -u router-outage-heartbeat -f",
+    "log:journal:boot": "journalctl --user -u router-outage-heartbeat -b --no-pager"
   },
   "dependencies": {
     "pino": "^9.0.0",

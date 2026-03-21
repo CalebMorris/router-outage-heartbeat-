@@ -1,28 +1,144 @@
-# What
+# Router Outage Heartbeat
 
-## Problem
+A background daemon that detects and logs internet outages for ISP reporting. It pings external endpoints on a regular schedule, switches to rapid polling when an outage is detected, and logs structured JSON events so you can generate a report to share with your ISP.
 
-I'm currently experience regular outages of my interntet, where the router goes down for a period of 30-90 seconds at a time.
-The ISP is currently working on a finding the issue on their end, but they have no telemetry on when this is happening.
+---
 
-## Solution
+## How it works
 
-We're creating a heartbeat daemon (Node.js) that runs in the background of this PC, and regularly makes network pings to external services. When the ping fails during one of my router outages, we start pinging much much more frequently to get a better estimate of how long the outage is taking.
+- Probes 4 external endpoints in round-robin every 30 seconds
+- If 2 consecutive probes fail, it declares an outage and switches to probing every 2 seconds
+- When 3 consecutive probes succeed, it declares recovery and returns to 30-second intervals
+- All probe results and outage events are written as JSON to a log file
 
-### Caveats
+---
 
-I want to avoid any quota violation issues by pinging once service too many times or getting false-positives from a single target going down, so we should have a suite of target endpoints to rotate through as we deal with this.
+## Requirements
 
-# Output
+- Node.js (via nvm or system install)
+- Linux with systemd user services enabled
 
-## Request Logs
+---
 
-Record the period pings to external sites.
+## Installation
 
-* Timestamp of when the ping was started
-* The target endpiont
-* Response success/failure
+**1. Install dependencies and build:**
+```bash
+npm install
+npm run build
+```
 
-## Outage Logs
+**2. Install and start the service:**
+```bash
+npm run service:install
+```
 
-A filter of request logs that are specifically when the router appears to be down.
+This builds the project, installs the systemd user service, enables it, and starts it. The service will automatically restart on crash and start at boot.
+
+**3. Install log rotation:**
+```bash
+sudo cp logrotate.d/router-outage-heartbeat /etc/logrotate.d/
+```
+
+This configures the system to rotate the log file daily, keeping 30 days of history.
+
+> **Note:** If your Node.js is installed via nvm, the service file at
+> `systemd/router-outage-heartbeat.service` has a hardcoded nvm path. If you
+> upgrade Node, update the version in `ExecStart` and re-run `npm run service:install`.
+
+---
+
+## Service management
+
+```bash
+npm run service:status     # Show current status
+npm run service:start      # Start the service
+npm run service:stop       # Stop the service
+npm run service:restart    # Restart the service
+npm run service:install    # Build + reinstall + restart
+```
+
+On every start, the journal will show which endpoints are being monitored:
+```bash
+npm run log:journal
+# node[1234]: router-outage-heartbeat starting — monitoring: 8.8.8.8:53, 1.1.1.1:53, ...
+```
+
+---
+
+## Monitoring
+
+**Watch the structured JSON log in real time:**
+```bash
+npm run log:tail
+```
+
+**Watch the systemd journal (service lifecycle + errors):**
+```bash
+npm run log:journal
+```
+
+**View everything since last boot:**
+```bash
+npm run log:journal:boot
+```
+
+Log file location: `~/.local/share/router-outage-heartbeat/heartbeat.log`
+
+Each line is a JSON event. Event types:
+
+| `event` | When |
+|---|---|
+| `startup` | Service started |
+| `shutdown` | Service stopped gracefully |
+| `probe` | Every ping attempt (includes `state: normal\|outage`) |
+| `outage_start` | 2 consecutive failures detected |
+| `outage_end` | 3 consecutive successes after an outage (includes `durationMs`) |
+
+---
+
+## Analyzing outages
+
+```bash
+npm run analyze                              # Outage summary report (default)
+npm run analyze -- --mode request            # All probe events
+npm run analyze -- --mode outage             # Only probes during outage windows
+npm run analyze -- --format csv              # CSV output for spreadsheet import
+npm run analyze -- --format csv > report.csv # Save CSV to file
+npm run analyze -- --since 2026-03-01        # Filter by date
+```
+
+**Summary report** shows: total outage count, total downtime, mean/min/max duration, most common hour, and a per-outage table.
+
+**CSV report** columns: `started_at`, `ended_at`, `duration_ms`, `duration_human` — suitable for sharing with an ISP.
+
+---
+
+## Configuration
+
+All tunable values are in `src/config.ts`. After any change, rebuild and reinstall:
+
+```bash
+npm run build && npm run service:restart
+```
+
+| Setting | Default | Description |
+|---|---|---|
+| `normalIntervalMs` | 30000 | Probe interval during normal operation |
+| `outageIntervalMs` | 2000 | Probe interval during an outage |
+| `consecutiveFailuresForOutage` | 2 | Failures required to declare outage |
+| `consecutiveSuccessesForRecovery` | 3 | Successes required to declare recovery |
+| `pingTimeoutMs` | 5000 | Per-probe TCP timeout |
+| `endpoints` | 4 external hosts | Endpoints to probe in round-robin |
+
+**To test outage detection without unplugging:** temporarily add `{ host: 'localhost', port: 9999 }` to the endpoints list, rebuild, and restart. Two consecutive failures will trigger outage mode. Remove it and restart when done.
+
+---
+
+## Development
+
+```bash
+npm run dev     # Run with ts-node, logs to stdout
+npm run build   # Compile TypeScript to dist/
+npm run lint    # Run ESLint
+```
