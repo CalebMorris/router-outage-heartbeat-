@@ -38,12 +38,27 @@ interface OutageEndEntry {
   outageEndedAt: string;
 }
 
-type LogEntry = ProbeEntry | OutageStartEntry | OutageEndEntry | { time: string; event: string; [key: string]: unknown };
+interface BulkheadCheckEntry {
+  time: string;
+  event: 'bulkhead_check';
+  totalEndpoints: number;
+  failedCount: number;
+  majorityFailed: boolean;
+}
+
+type LogEntry = ProbeEntry | OutageStartEntry | OutageEndEntry | BulkheadCheckEntry | { time: string; event: string; [key: string]: unknown };
 
 interface OutageZone {
   xMin: string;
   xMax: string;
   ongoing: boolean;
+}
+
+interface PartialFailureZone {
+  xMin: string;
+  xMax: string;
+  failedCount: number;
+  totalEndpoints: number;
 }
 
 interface Args {
@@ -129,10 +144,12 @@ function buildDatasets(entries: LogEntry[]): {
   successPoints: { x: string; y: number; host: string; port: number }[];
   failurePoints: { x: string; y: number; host: string; port: number }[];
   outageZones: OutageZone[];
+  partialFailureZones: PartialFailureZone[];
 } {
   const successPoints: { x: string; y: number; host: string; port: number }[] = [];
   const failurePoints: { x: string; y: number; host: string; port: number }[] = [];
   const outageZones: OutageZone[] = [];
+  const partialFailureZones: PartialFailureZone[] = [];
   const pendingStarts = new Map<string, string>();
 
   for (const entry of entries) {
@@ -150,6 +167,11 @@ function buildDatasets(entries: LogEntry[]): {
       const e = entry as OutageEndEntry;
       pendingStarts.delete(e.outageStartedAt);
       outageZones.push({ xMin: e.outageStartedAt, xMax: e.outageEndedAt, ongoing: false });
+    } else if (entry.event === 'bulkhead_check') {
+      const e = entry as BulkheadCheckEntry;
+      if (!e.majorityFailed) {
+        partialFailureZones.push({ xMin: e.time, xMax: e.time, failedCount: e.failedCount, totalEndpoints: e.totalEndpoints });
+      }
     }
   }
 
@@ -158,25 +180,89 @@ function buildDatasets(entries: LogEntry[]): {
     outageZones.push({ xMin: startedAt, xMax: new Date().toISOString(), ongoing: true });
   }
 
-  return { successPoints, failurePoints, outageZones };
+  return { successPoints, failurePoints, outageZones, partialFailureZones };
+}
+
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m < 60) return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
 }
 
 function buildHtml(params: {
   successPoints: { x: string; y: number }[];
   failurePoints: { x: string; y: number }[];
   outageZones: OutageZone[];
+  partialFailureZones: PartialFailureZone[];
   since: Date | null;
   generatedAt: string;
   live: boolean;
 }): string {
-  const { successPoints, failurePoints, outageZones, since, generatedAt, live } = params;
+  const { successPoints, failurePoints, outageZones, partialFailureZones, since, generatedAt, live } = params;
   const sinceText = since ? `since ${since.toISOString().slice(0, 10)}` : 'all time';
+
+  const outageListHtml = outageZones.length === 0 ? '' : (() => {
+    const sorted = [...outageZones].sort(
+      (a, b) => new Date(b.xMin).getTime() - new Date(a.xMin).getTime(),
+    );
+    const rows = sorted.map((z) => {
+      const start = new Date(z.xMin);
+      const durationStr = z.ongoing
+        ? `ongoing (~${formatDuration(Date.now() - start.getTime())} so far)`
+        : formatDuration(new Date(z.xMax).getTime() - new Date(z.xMin).getTime());
+      const durationClass = z.ongoing ? 'ongoing' : '';
+      return `      <tr data-xmin="${z.xMin}"><td class="outage-start" data-iso="${z.xMin}"></td><td class="duration ${durationClass}">${durationStr}</td></tr>`;
+    }).join('\n');
+    return `
+  <section class="outage-list">
+    <h2>Outages (${outageZones.length})</h2>
+    <table>
+      <thead><tr><th>Start</th><th>Duration</th></tr></thead>
+      <tbody>
+${rows}
+      </tbody>
+    </table>
+  </section>
+  <script>document.querySelectorAll('.outage-start[data-iso]').forEach(function(el){el.textContent=new Date(el.dataset.iso).toLocaleString();});<\/script>`;
+  })();
+  const degradedListHtml = partialFailureZones.length === 0 ? '' : (() => {
+    const sorted = [...partialFailureZones].sort(
+      (a, b) => new Date(b.xMin).getTime() - new Date(a.xMin).getTime(),
+    );
+    const rows = sorted.map((z) => {
+      return `      <tr data-xmin="${z.xMin}"><td class="degraded-time" data-iso="${z.xMin}"></td><td class="failed-count">${z.failedCount}/${z.totalEndpoints} endpoints</td></tr>`;
+    }).join('\n');
+    return `
+  <section class="degraded-list">
+    <h2>Degraded Checks (${partialFailureZones.length})</h2>
+    <table>
+      <thead><tr><th>Time</th><th>Failed</th></tr></thead>
+      <tbody>
+${rows}
+      </tbody>
+    </table>
+  </section>
+  <script>document.querySelectorAll('.degraded-time[data-iso]').forEach(function(el){el.textContent=new Date(el.dataset.iso).toLocaleString();});<\/script>`;
+  })();
+
+  const legendHtml = `
+  <div class="chart-legend">
+    <span><span class="chart-legend-swatch" style="background:rgba(239,68,68,0.4);border:1px solid rgba(239,68,68,0.7);"></span>Outage</span>
+    <span><span class="chart-legend-swatch" style="background:rgba(234,179,8,0.25);border:1px solid rgba(234,179,8,0.7);"></span>Degraded</span>
+  </div>`;
+
   const totalProbes = successPoints.length + failurePoints.length;
   const emptyNotice = totalProbes === 0
     ? `<p class="empty-notice">No probe data found for the selected time range.</p>`
     : '';
 
   const outageZonesJson = JSON.stringify(outageZones);
+  const partialFailureZonesJson = JSON.stringify(partialFailureZones);
   const successJson = JSON.stringify(successPoints);
   const failureJson = JSON.stringify(failurePoints);
   const metaRefresh = live ? `\n  <meta http-equiv="refresh" content="60">` : '';
@@ -200,6 +286,23 @@ function buildHtml(params: {
     .meta { font-size: 0.8rem; color: #94a3b8; margin-bottom: 20px; }
     .chart-container { position: relative; width: 100%; height: 480px; }
     .empty-notice { color: #f87171; font-size: 0.9rem; margin-bottom: 16px; }
+    .outage-list { margin-top: 32px; }
+    .outage-list h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #e2e8f0; }
+    .outage-list table { border-collapse: collapse; font-size: 0.85rem; width: auto; }
+    .outage-list th { text-align: left; padding: 4px 16px 4px 0; color: #94a3b8; font-weight: 500; border-bottom: 1px solid rgba(148,163,184,0.2); }
+    .outage-list td { padding: 5px 16px 5px 0; color: #e2e8f0; border-bottom: 1px solid rgba(148,163,184,0.08); }
+    .duration { font-variant-numeric: tabular-nums; }
+    .ongoing { color: #f87171; }
+    .outage-list tbody tr.hovered { background: rgba(239,68,68,0.15); outline: 1px solid rgba(239,68,68,0.5); }
+    .degraded-list { margin-top: 24px; }
+    .degraded-list h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #e2e8f0; }
+    .degraded-list table { border-collapse: collapse; font-size: 0.85rem; width: auto; }
+    .degraded-list th { text-align: left; padding: 4px 16px 4px 0; color: #94a3b8; font-weight: 500; border-bottom: 1px solid rgba(148,163,184,0.2); }
+    .degraded-list td { padding: 5px 16px 5px 0; color: #e2e8f0; border-bottom: 1px solid rgba(148,163,184,0.08); }
+    .degraded-list .failed-count { color: #eab308; font-variant-numeric: tabular-nums; }
+    .degraded-list tbody tr.hovered { background: rgba(234,179,8,0.15); outline: 1px solid rgba(234,179,8,0.5); }
+    .chart-legend { display: flex; gap: 20px; margin-top: 12px; font-size: 0.8rem; color: #94a3b8; align-items: center; }
+    .chart-legend-swatch { display: inline-block; width: 16px; height: 12px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
   </style>
 </head>
 <body>
@@ -209,31 +312,141 @@ function buildHtml(params: {
   <div class="chart-container">
     <canvas id="chart"></canvas>
   </div>
+  ${legendHtml}
+  <div id="outage-tooltip" style="display:none;position:fixed;background:#1e293b;border:1px solid rgba(239,68,68,0.5);color:#e2e8f0;padding:8px 12px;border-radius:6px;font-size:13px;pointer-events:none;z-index:100;line-height:1.6;"></div>
+  ${outageListHtml}
+  ${degradedListHtml}
   <script>
     const outageZones = ${outageZonesJson};
+    const partialFailureZones = ${partialFailureZonesJson};
+    function fmtDur(ms) {
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's';
+      const m = Math.floor(s / 60), rs = s % 60;
+      if (m < 60) return m + 'm ' + (rs > 0 ? rs + 's' : '');
+      const h = Math.floor(m / 60), rm = m % 60;
+      return h + 'h ' + (rm > 0 ? rm + 'm' : '');
+    }
+    let hoveredZone = null;
+    let hoveredPartialZone = null;
     const outageBandsPlugin = {
       id: 'outageBands',
       beforeDraw(chart) {
-        if (!outageZones.length) return;
         const { ctx, chartArea, scales } = chart;
-        ctx.save();
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.15)';
-        for (const zone of outageZones) {
-          const x1 = Math.max(scales.x.getPixelForValue(new Date(zone.xMin).getTime()), chartArea.left);
-          const x2 = Math.min(scales.x.getPixelForValue(new Date(zone.xMax).getTime()), chartArea.right);
-          if (x2 <= x1) continue;
-          ctx.fillRect(x1, chartArea.top, x2 - x1, chartArea.height);
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
-          ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.moveTo(x1, chartArea.top); ctx.lineTo(x1, chartArea.bottom); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(x2, chartArea.top); ctx.lineTo(x2, chartArea.bottom); ctx.stroke();
+        // Pass 1: yellow partial-failure bands (drawn first, under red)
+        if (partialFailureZones.length) {
+          ctx.save();
+          for (const zone of partialFailureZones) {
+            const cx = scales.x.getPixelForValue(new Date(zone.xMin).getTime());
+            const renderLeft  = Math.max(cx - 2, chartArea.left);
+            const renderRight = Math.min(cx + 2, chartArea.right);
+            if (renderRight <= renderLeft) continue;
+            const active = hoveredPartialZone && zone.xMin === hoveredPartialZone.xMin;
+            ctx.fillStyle = active ? 'rgba(234, 179, 8, 0.45)' : 'rgba(234, 179, 8, 0.25)';
+            ctx.fillRect(renderLeft, chartArea.top, renderRight - renderLeft, chartArea.height);
+            ctx.strokeStyle = active ? 'rgba(234, 179, 8, 0.9)' : 'rgba(234, 179, 8, 0.7)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(cx, chartArea.top); ctx.lineTo(cx, chartArea.bottom); ctx.stroke();
+          }
+          ctx.restore();
         }
-        ctx.restore();
+        // Pass 2: red outage bands (drawn on top)
+        if (outageZones.length) {
+          ctx.save();
+          for (const zone of outageZones) {
+            const x1 = Math.max(scales.x.getPixelForValue(new Date(zone.xMin).getTime()), chartArea.left);
+            const x2 = Math.min(scales.x.getPixelForValue(new Date(zone.xMax).getTime()), chartArea.right);
+            if (x2 <= x1) continue;
+            const active = hoveredZone && zone.xMin === hoveredZone.xMin;
+            ctx.fillStyle = active ? 'rgba(239, 68, 68, 0.4)' : 'rgba(239, 68, 68, 0.15)';
+            ctx.fillRect(x1, chartArea.top, x2 - x1, chartArea.height);
+            ctx.strokeStyle = active ? 'rgba(239, 68, 68, 0.9)' : 'rgba(239, 68, 68, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(x1, chartArea.top); ctx.lineTo(x1, chartArea.bottom); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x2, chartArea.top); ctx.lineTo(x2, chartArea.bottom); ctx.stroke();
+          }
+          ctx.restore();
+        }
+      },
+      afterEvent(chart, args) {
+        const e = args.event;
+        const { chartArea, scales } = chart;
+        const tooltip = document.getElementById('outage-tooltip');
+        const outageRows   = document.querySelectorAll('.outage-list tbody tr[data-xmin]');
+        const degradedRows = document.querySelectorAll('.degraded-list tbody tr[data-xmin]');
+        outageRows.forEach(function(r){ r.classList.remove('hovered'); });
+        degradedRows.forEach(function(r){ r.classList.remove('hovered'); });
+        if (e.type === 'mousemove' && e.x >= chartArea.left && e.x <= chartArea.right
+            && e.y >= chartArea.top && e.y <= chartArea.bottom) {
+          const t = scales.x.getValueForPixel(e.x);
+          // Check outage zones first (take visual priority)
+          let foundOutage = null;
+          for (let i = 0; i < outageZones.length; i++) {
+            const zone = outageZones[i];
+            if (t >= new Date(zone.xMin).getTime() && t <= new Date(zone.xMax).getTime()) {
+              foundOutage = zone;
+              break;
+            }
+          }
+          if (foundOutage) {
+            if (!hoveredZone || hoveredZone.xMin !== foundOutage.xMin) {
+              hoveredZone = foundOutage;
+              args.changed = true;
+            }
+            if (hoveredPartialZone) { hoveredPartialZone = null; args.changed = true; }
+            const durMs = new Date(foundOutage.xMax).getTime() - new Date(foundOutage.xMin).getTime();
+            const durStr = foundOutage.ongoing
+              ? 'ongoing (~' + fmtDur(durMs) + ' so far)'
+              : fmtDur(durMs);
+            tooltip.innerHTML =
+              '<b>Outage</b><br>' +
+              'Start: ' + new Date(foundOutage.xMin).toLocaleString() + '<br>' +
+              'Duration: ' + durStr;
+            tooltip.style.borderColor = 'rgba(239,68,68,0.5)';
+            tooltip.style.display = 'block';
+            const tooFarRight = e.native.clientX + 14 + tooltip.offsetWidth > window.innerWidth;
+            tooltip.style.left = (tooFarRight ? e.native.clientX - 14 - tooltip.offsetWidth : e.native.clientX + 14) + 'px';
+            tooltip.style.top  = (e.native.clientY - 10) + 'px';
+            outageRows.forEach(function(r){ if (r.dataset.xmin === foundOutage.xMin) r.classList.add('hovered'); });
+            chart.canvas.style.cursor = 'pointer';
+            return;
+          }
+          // Check partial failure zones by pixel proximity
+          let foundPartial = null;
+          for (let i = 0; i < partialFailureZones.length; i++) {
+            const zone = partialFailureZones[i];
+            const px = scales.x.getPixelForValue(new Date(zone.xMin).getTime());
+            if (Math.abs(e.x - px) <= 4) { foundPartial = zone; break; }
+          }
+          if (foundPartial) {
+            if (!hoveredPartialZone || hoveredPartialZone.xMin !== foundPartial.xMin) {
+              hoveredPartialZone = foundPartial;
+              args.changed = true;
+            }
+            if (hoveredZone) { hoveredZone = null; args.changed = true; }
+            tooltip.innerHTML =
+              '<b>Degraded</b><br>' +
+              'Time: ' + new Date(foundPartial.xMin).toLocaleString() + '<br>' +
+              'Failed: ' + foundPartial.failedCount + '/' + foundPartial.totalEndpoints + ' endpoints';
+            tooltip.style.borderColor = 'rgba(234,179,8,0.5)';
+            tooltip.style.display = 'block';
+            const tooFarRight = e.native.clientX + 14 + tooltip.offsetWidth > window.innerWidth;
+            tooltip.style.left = (tooFarRight ? e.native.clientX - 14 - tooltip.offsetWidth : e.native.clientX + 14) + 'px';
+            tooltip.style.top  = (e.native.clientY - 10) + 'px';
+            degradedRows.forEach(function(r){ if (r.dataset.xmin === foundPartial.xMin) r.classList.add('hovered'); });
+            chart.canvas.style.cursor = 'pointer';
+            return;
+          }
+        }
+        if (hoveredZone) { hoveredZone = null; args.changed = true; }
+        if (hoveredPartialZone) { hoveredPartialZone = null; args.changed = true; }
+        tooltip.style.display = 'none';
+        chart.canvas.style.cursor = 'default';
       },
     };
     Chart.register(outageBandsPlugin);
     const ctx = document.getElementById('chart').getContext('2d');
-    new Chart(ctx, {
+    const myChart = new Chart(ctx, {
       type: 'scatter',
       data: {
         datasets: [
@@ -303,6 +516,13 @@ function buildHtml(params: {
         },
       },
     });
+    myChart.canvas.addEventListener('mouseleave', function(){
+      document.getElementById('outage-tooltip').style.display = 'none';
+      document.querySelectorAll('.outage-list tbody tr').forEach(function(r){ r.classList.remove('hovered'); });
+      document.querySelectorAll('.degraded-list tbody tr').forEach(function(r){ r.classList.remove('hovered'); });
+      myChart.canvas.style.cursor = 'default';
+      if (hoveredZone || hoveredPartialZone) { hoveredZone = null; hoveredPartialZone = null; myChart.update('none'); }
+    });
   </script>
 </body>
 </html>`;
@@ -315,11 +535,12 @@ async function generate(logPath: string, since: Date | null, outPath: string, li
     console.error(`Warning: ${skippedLines} malformed line(s) skipped.`);
   }
 
-  const { successPoints, failurePoints, outageZones } = buildDatasets(entries);
+  const { successPoints, failurePoints, outageZones, partialFailureZones } = buildDatasets(entries);
   const html = buildHtml({
     successPoints,
     failurePoints,
     outageZones,
+    partialFailureZones,
     since,
     generatedAt: new Date().toISOString(),
     live,
