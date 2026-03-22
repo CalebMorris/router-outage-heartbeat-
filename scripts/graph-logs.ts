@@ -292,7 +292,8 @@ ${rows}
     .meta { font-size: 0.8rem; color: #94a3b8; margin-bottom: 20px; }
     .chart-container { position: relative; width: 100%; height: 480px; }
     .empty-notice { color: #f87171; font-size: 0.9rem; margin-bottom: 16px; }
-    .outage-list { margin-top: 32px; }
+    .lists-row { display: flex; gap: 40px; margin-top: 32px; align-items: flex-start; }
+    .outage-list { }
     .outage-list h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #e2e8f0; }
     .outage-list table { border-collapse: collapse; font-size: 0.85rem; width: auto; }
     .outage-list th { text-align: left; padding: 4px 16px 4px 0; color: #94a3b8; font-weight: 500; border-bottom: 1px solid rgba(148,163,184,0.2); }
@@ -300,7 +301,7 @@ ${rows}
     .duration { font-variant-numeric: tabular-nums; }
     .ongoing { color: #f87171; }
     .outage-list tbody tr.hovered { background: rgba(239,68,68,0.15); outline: 1px solid rgba(239,68,68,0.5); }
-    .degraded-list { margin-top: 24px; }
+    .degraded-list { }
     .degraded-list h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #e2e8f0; }
     .degraded-list table { border-collapse: collapse; font-size: 0.85rem; width: auto; }
     .degraded-list th { text-align: left; padding: 4px 16px 4px 0; color: #94a3b8; font-weight: 500; border-bottom: 1px solid rgba(148,163,184,0.2); }
@@ -321,8 +322,10 @@ ${rows}
   </div>
   ${legendHtml}
   <div id="outage-tooltip" style="display:none;position:fixed;background:#1e293b;border:1px solid rgba(239,68,68,0.5);color:#e2e8f0;padding:8px 12px;border-radius:6px;font-size:13px;pointer-events:none;z-index:100;line-height:1.6;"></div>
-  ${outageListHtml}
-  ${degradedListHtml}
+  <div class="lists-row">
+    ${outageListHtml}
+    ${degradedListHtml}
+  </div>
   <script>
     const outageZones = ${outageZonesJson};
     const partialFailureZones = ${partialFailureZonesJson};
