@@ -72,7 +72,8 @@ npm run log:journal
 
 **Watch the structured JSON log in real time:**
 ```bash
-npm run log:tail
+npm run log:tail           # all events
+npm run log:tail:failures  # only failed probes (success: false)
 ```
 
 **Watch the systemd journal (service lifecycle + errors):**

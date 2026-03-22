@@ -19,6 +19,7 @@
     "service:enable": "systemctl --user enable router-outage-heartbeat",
     "service:disable": "systemctl --user disable router-outage-heartbeat",
     "log:tail": "tail -f ~/.local/share/router-outage-heartbeat/heartbeat.log | jq .",
+    "log:tail:failures": "tail -f ~/.local/share/router-outage-heartbeat/heartbeat.log | jq 'select(.success == false)'",
     "log:journal": "journalctl --user -u router-outage-heartbeat -f",
     "log:journal:boot": "journalctl --user -u router-outage-heartbeat -b --no-pager"
   },

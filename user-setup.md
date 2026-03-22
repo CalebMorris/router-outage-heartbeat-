@@ -29,7 +29,7 @@ journalctl --user -u router-outage-heartbeat -n 50
 Wait 60–90 seconds, then:
 
 ```bash
-tail -f ~/.local/share/router-outage-heartbeat/heartbeat.log | jq .
+npm run log:tail
 ```
 
 You should see `probe` events every 30 seconds. If the file doesn't exist, the service likely didn't start — check the journal.
