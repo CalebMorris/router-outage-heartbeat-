@@ -141,7 +141,7 @@ function buildDatasets(entries: LogEntry[]): {
       if (p.success && p.latencyMs !== null) {
         successPoints.push({ x: p.time, y: p.latencyMs, host: p.host, port: p.port });
       } else if (!p.success) {
-        failurePoints.push({ x: p.time, y: 0, host: p.host, port: p.port });
+        failurePoints.push({ x: p.time, y: 0.5, host: p.host, port: p.port });
       }
     } else if (entry.event === 'outage_start') {
       const e = entry as OutageStartEntry;
@@ -278,7 +278,8 @@ function buildHtml(params: {
             grid: { color: 'rgba(148,163,184,0.1)' },
           },
           y: {
-            min: 0,
+            type: 'logarithmic',
+            min: 1,
             title: { display: true, text: 'Latency (ms)', color: '#94a3b8' },
             ticks: { color: '#94a3b8' },
             grid: { color: 'rgba(148,163,184,0.1)' },
