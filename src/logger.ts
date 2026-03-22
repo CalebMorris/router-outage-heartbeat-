@@ -45,7 +45,15 @@ export interface ShutdownEvent {
   reason: string;
 }
 
-export type LogEvent = ProbeEvent | BulkheadCheckEvent | OutageStartEvent | OutageEndEvent | StartupEvent | ShutdownEvent;
+export interface StartupHealthCheckEvent {
+  event: 'startup_health_check';
+  totalEndpoints: number;
+  failedCount: number;
+  failedEndpoints: Array<{ host: string; port: number }>;
+  allHealthy: boolean;
+}
+
+export type LogEvent = ProbeEvent | BulkheadCheckEvent | OutageStartEvent | OutageEndEvent | StartupEvent | ShutdownEvent | StartupHealthCheckEvent;
 
 let logger: pino.Logger;
 let productionStream: ReturnType<typeof pino.destination> | null = null;

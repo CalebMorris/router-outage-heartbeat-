@@ -88,14 +88,30 @@ process.on('SIGINT', () => { shutdown('SIGINT'); });
 // SIGHUP: reopen the log file after logrotate has rotated it.
 process.on('SIGHUP', () => { reopenLog(); });
 
-initLogger(CONFIG.logPath);
+async function main(): Promise<void> {
+  initLogger(CONFIG.logPath);
 
-const endpointList = CONFIG.endpoints.map((e) => `${e.host}:${e.port}`).join(', ');
-process.stderr.write(`router-outage-heartbeat starting — monitoring: ${endpointList}\n`);
+  const endpointList = CONFIG.endpoints.map((e) => `${e.host}:${e.port}`).join(', ');
+  process.stderr.write(`router-outage-heartbeat starting — monitoring: ${endpointList}\n`);
 
-logEvent({
-  event: 'startup',
-  config: CONFIG,
-});
+  logEvent({
+    event: 'startup',
+    config: CONFIG,
+  });
 
-void tick();
+  const healthResults = await Promise.all(
+    CONFIG.endpoints.map((e) => probeEndpoint(e.host, e.port, CONFIG.pingTimeoutMs)),
+  );
+  const failed = healthResults.filter((r) => !r.success);
+  logEvent({
+    event: 'startup_health_check',
+    totalEndpoints: CONFIG.endpoints.length,
+    failedCount: failed.length,
+    failedEndpoints: failed.map((r) => ({ host: r.host, port: r.port })),
+    allHealthy: failed.length === 0,
+  });
+
+  void tick();
+}
+
+void main();
