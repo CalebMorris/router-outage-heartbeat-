@@ -37,6 +37,7 @@ export interface BulkheadCheckEvent {
   totalEndpoints: number;
   failedCount: number;
   majorityFailed: boolean;
+  failedEndpoints: Array<{ host: string; port: number }>;
 }
 
 export interface ShutdownEvent {

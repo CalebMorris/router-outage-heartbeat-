@@ -44,6 +44,7 @@ interface BulkheadCheckEntry {
   totalEndpoints: number;
   failedCount: number;
   majorityFailed: boolean;
+  failedEndpoints?: Array<{ host: string; port: number }>;
 }
 
 type LogEntry = ProbeEntry | OutageStartEntry | OutageEndEntry | BulkheadCheckEntry | { time: string; event: string; [key: string]: unknown };
@@ -59,6 +60,7 @@ interface PartialFailureZone {
   xMax: string;
   failedCount: number;
   totalEndpoints: number;
+  failedEndpoints: Array<{ host: string; port: number }>;
 }
 
 interface Args {
@@ -170,7 +172,7 @@ function buildDatasets(entries: LogEntry[]): {
     } else if (entry.event === 'bulkhead_check') {
       const e = entry as BulkheadCheckEntry;
       if (!e.majorityFailed) {
-        partialFailureZones.push({ xMin: e.time, xMax: e.time, failedCount: e.failedCount, totalEndpoints: e.totalEndpoints });
+        partialFailureZones.push({ xMin: e.time, xMax: e.time, failedCount: e.failedCount, totalEndpoints: e.totalEndpoints, failedEndpoints: e.failedEndpoints ?? [] });
       }
     }
   }
@@ -235,13 +237,17 @@ ${rows}
       (a, b) => new Date(b.xMin).getTime() - new Date(a.xMin).getTime(),
     );
     const rows = sorted.map((z) => {
-      return `      <tr data-xmin="${z.xMin}"><td class="degraded-time" data-iso="${z.xMin}"></td><td class="failed-count">${z.failedCount}/${z.totalEndpoints} endpoints</td></tr>`;
+      const endpointList = z.failedEndpoints.length > 0
+        ? z.failedEndpoints.map((ep) => `${ep.host}:${ep.port}`).join(', ')
+        : '';
+      const endpointCell = endpointList ? `<td class="failed-endpoints">${endpointList}</td>` : '<td></td>';
+      return `      <tr data-xmin="${z.xMin}"><td class="degraded-time" data-iso="${z.xMin}"></td><td class="failed-count">${z.failedCount}/${z.totalEndpoints}</td>${endpointCell}</tr>`;
     }).join('\n');
     return `
   <section class="degraded-list">
     <h2>Degraded Checks (${partialFailureZones.length})</h2>
     <table>
-      <thead><tr><th>Time</th><th>Failed</th></tr></thead>
+      <thead><tr><th>Time</th><th>Failed</th><th>Endpoints</th></tr></thead>
       <tbody>
 ${rows}
       </tbody>
@@ -300,6 +306,7 @@ ${rows}
     .degraded-list th { text-align: left; padding: 4px 16px 4px 0; color: #94a3b8; font-weight: 500; border-bottom: 1px solid rgba(148,163,184,0.2); }
     .degraded-list td { padding: 5px 16px 5px 0; color: #e2e8f0; border-bottom: 1px solid rgba(148,163,184,0.08); }
     .degraded-list .failed-count { color: #eab308; font-variant-numeric: tabular-nums; }
+    .degraded-list .failed-endpoints { color: #94a3b8; font-size: 0.8rem; font-family: monospace; }
     .degraded-list tbody tr.hovered { background: rgba(234,179,8,0.15); outline: 1px solid rgba(234,179,8,0.5); }
     .chart-legend { display: flex; gap: 20px; margin-top: 12px; font-size: 0.8rem; color: #94a3b8; align-items: center; }
     .chart-legend-swatch { display: inline-block; width: 16px; height: 12px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
@@ -424,10 +431,13 @@ ${rows}
               args.changed = true;
             }
             if (hoveredZone) { hoveredZone = null; args.changed = true; }
+            const epLines = foundPartial.failedEndpoints.length > 0
+              ? '<br>' + foundPartial.failedEndpoints.map(function(ep){ return '&nbsp;&nbsp;' + ep.host + ':' + ep.port; }).join('<br>')
+              : '';
             tooltip.innerHTML =
               '<b>Degraded</b><br>' +
               'Time: ' + new Date(foundPartial.xMin).toLocaleString() + '<br>' +
-              'Failed: ' + foundPartial.failedCount + '/' + foundPartial.totalEndpoints + ' endpoints';
+              'Failed: ' + foundPartial.failedCount + '/' + foundPartial.totalEndpoints + ' endpoints' + epLines;
             tooltip.style.borderColor = 'rgba(234,179,8,0.5)';
             tooltip.style.display = 'block';
             const tooFarRight = e.native.clientX + 14 + tooltip.offsetWidth > window.innerWidth;

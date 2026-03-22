@@ -32,7 +32,9 @@ async function tick(): Promise<void> {
     const bulkheadResults = await Promise.all(
       CONFIG.endpoints.map((e) => probeEndpoint(e.host, e.port, CONFIG.pingTimeoutMs)),
     );
-    const failedCount = bulkheadResults.filter((r) => !r.success).length;
+    const failed = bulkheadResults.filter((r) => !r.success);
+    const failedCount = failed.length;
+    const failedEndpoints = failed.map((r) => ({ host: r.host, port: r.port }));
     const majorityFailed = failedCount > CONFIG.endpoints.length / 2;
     const checkedAt = new Date().toISOString();
 
@@ -41,6 +43,7 @@ async function tick(): Promise<void> {
       totalEndpoints: CONFIG.endpoints.length,
       failedCount,
       majorityFailed,
+      failedEndpoints,
     });
 
     const bulkheadTransition = machine.processBulkheadResult(majorityFailed, checkedAt);
