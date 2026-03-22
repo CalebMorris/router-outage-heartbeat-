@@ -12,6 +12,7 @@ let shuttingDown = false;
 let outageStartedAt: string | null = null;
 
 async function tick(): Promise<void> {
+  const tickStart = Date.now();
   const endpoint = rotator.next();
   const result = await probeEndpoint(endpoint.host, endpoint.port, CONFIG.pingTimeoutMs);
   const transition = machine.process(result);
@@ -67,7 +68,9 @@ async function tick(): Promise<void> {
   }
 
   if (!shuttingDown) {
-    setTimeout(() => { void tick(); }, machine.getIntervalMs());
+    const elapsed = Date.now() - tickStart;
+    const delay = Math.max(0, machine.getIntervalMs() - elapsed);
+    setTimeout(() => { void tick(); }, delay);
   }
 }
 
