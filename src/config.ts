@@ -46,9 +46,21 @@ export const CONFIG: Config = {
     // CleanBrowsing
     { host: '185.228.168.9',   port: 53  },
     { host: '185.228.169.9',   port: 53  },
-    // DNS.Watch
-    { host: '84.200.69.80',    port: 53  },
-    { host: '84.200.70.40',    port: 53  },
+    // AliDNS (Alibaba Cloud — massive anycast)
+    { host: '223.5.5.5',       port: 53  },
+    { host: '223.6.6.6',       port: 53  },
+    // Yandex DNS (anycast, Russia/Europe/global)
+    { host: '77.88.8.8',       port: 53  },
+    { host: '77.88.8.1',       port: 53  },
+    // CIRA Canadian Shield (anycast, nonprofit)
+    { host: '149.112.121.10',  port: 53  },
+    { host: '149.112.122.10',  port: 53  },
+    // Control D (anycast, unfiltered free resolver)
+    { host: '76.76.2.0',       port: 53  },
+    { host: '76.76.10.0',      port: 53  },
+    // SafeDNS (anycast)
+    { host: '195.46.39.39',    port: 53  },
+    { host: '195.46.39.40',    port: 53  },
     // Comodo Secure DNS
     { host: '8.26.56.26',      port: 53  },
     { host: '8.20.247.20',     port: 53  },
