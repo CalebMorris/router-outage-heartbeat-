@@ -171,7 +171,7 @@ function buildDatasets(entries: LogEntry[]): {
       outageZones.push({ xMin: e.outageStartedAt, xMax: e.outageEndedAt, ongoing: false });
     } else if (entry.event === 'bulkhead_check') {
       const e = entry as BulkheadCheckEntry;
-      if (!e.majorityFailed) {
+      if (!e.majorityFailed && e.failedCount > 0) {
         partialFailureZones.push({ xMin: e.time, xMax: e.time, failedCount: e.failedCount, totalEndpoints: e.totalEndpoints, failedEndpoints: e.failedEndpoints ?? [] });
       }
     }
