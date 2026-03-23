@@ -22,7 +22,7 @@ export interface Config {
 export const CONFIG: Config = {
   normalIntervalMs: 5_000,
   outageIntervalMs: 100,
-  consecutiveSuccessesForRecovery: 5,
+  consecutiveSuccessesForRecovery: 12,
   pingTimeoutMs: 1_000,
   endpointQuarantineInitialBackoffMs: 60_000,
   endpointQuarantineMaxBackoffMs: 3_600_000,
