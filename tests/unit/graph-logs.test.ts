@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as readline from 'readline';
-import { parseArgs, main } from '../../scripts/graph-logs';
+import { parseArgs, main, mergeCloseOutageZones } from '../../scripts/graph-logs';
 
 jest.mock('child_process', () => ({ execSync: jest.fn() }));
 jest.mock('fs', () => ({
@@ -128,5 +128,80 @@ describe('main — live mode since regression', () => {
     expect(secondHtml).toContain('2026-03-20T18:00:00');
     // Sanity-check: an entry before the explicit --since would be absent in both renders
     expect(secondHtml).not.toContain(FAKE_24H_AGO);
+  });
+});
+
+describe('mergeCloseOutageZones', () => {
+  const zone = (xMin: string, xMax: string, ongoing = false): { xMin: string; xMax: string; ongoing: boolean } =>
+    ({ xMin, xMax, ongoing });
+
+  it('returns empty array for empty input', (): void => {
+    expect(mergeCloseOutageZones([])).toEqual([]);
+  });
+
+  it('returns single zone unchanged', (): void => {
+    const input = [zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:05:00.000Z')];
+    expect(mergeCloseOutageZones(input)).toEqual(input);
+  });
+
+  it('merges two zones with gap < 1 minute', (): void => {
+    const result = mergeCloseOutageZones([
+      zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:05:00.000Z'),
+      zone('2026-03-01T00:05:30.000Z', '2026-03-01T00:10:00.000Z'),
+    ]);
+    expect(result).toEqual([zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:10:00.000Z')]);
+  });
+
+  it('does not merge two zones with gap exactly 1 minute', (): void => {
+    const result = mergeCloseOutageZones([
+      zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:05:00.000Z'),
+      zone('2026-03-01T00:06:00.000Z', '2026-03-01T00:10:00.000Z'),
+    ]);
+    expect(result).toHaveLength(2);
+  });
+
+  it('does not merge two zones with gap > 1 minute', (): void => {
+    const result = mergeCloseOutageZones([
+      zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:05:00.000Z'),
+      zone('2026-03-01T00:10:00.000Z', '2026-03-01T00:15:00.000Z'),
+    ]);
+    expect(result).toHaveLength(2);
+  });
+
+  it('merges first two zones but not third when third gap is >= 1 minute', (): void => {
+    const result = mergeCloseOutageZones([
+      zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:05:00.000Z'),
+      zone('2026-03-01T00:05:30.000Z', '2026-03-01T00:10:00.000Z'),
+      zone('2026-03-01T00:20:00.000Z', '2026-03-01T00:25:00.000Z'),
+    ]);
+    expect(result).toEqual([
+      zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:10:00.000Z'),
+      zone('2026-03-01T00:20:00.000Z', '2026-03-01T00:25:00.000Z'),
+    ]);
+  });
+
+  it('merges all three zones in a chain when each gap is < 1 minute', (): void => {
+    const result = mergeCloseOutageZones([
+      zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:05:00.000Z'),
+      zone('2026-03-01T00:05:30.000Z', '2026-03-01T00:10:00.000Z'),
+      zone('2026-03-01T00:10:45.000Z', '2026-03-01T00:15:00.000Z'),
+    ]);
+    expect(result).toEqual([zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:15:00.000Z')]);
+  });
+
+  it('propagates ongoing=true when any zone in merged group is ongoing', (): void => {
+    const result = mergeCloseOutageZones([
+      zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:05:00.000Z', false),
+      zone('2026-03-01T00:05:30.000Z', '2026-03-01T00:10:00.000Z', true),
+    ]);
+    expect(result[0].ongoing).toBe(true);
+  });
+
+  it('keeps ongoing=false when no zone in merged group is ongoing', (): void => {
+    const result = mergeCloseOutageZones([
+      zone('2026-03-01T00:00:00.000Z', '2026-03-01T00:05:00.000Z', false),
+      zone('2026-03-01T00:05:30.000Z', '2026-03-01T00:10:00.000Z', false),
+    ]);
+    expect(result[0].ongoing).toBe(false);
   });
 });

@@ -227,7 +227,24 @@ function buildDatasets(entries: LogEntry[]): {
   }
 
   const quarantineZones = Array.from(quarantineMap.values());
-  return { successPoints, failurePoints, outageZones, partialFailureZones, quarantineZones };
+  return { successPoints, failurePoints, outageZones: mergeCloseOutageZones(outageZones), partialFailureZones, quarantineZones };
+}
+
+export function mergeCloseOutageZones(zones: OutageZone[]): OutageZone[] {
+  if (zones.length === 0) return [];
+  const sorted = [...zones].sort((a, b) => a.xMin.localeCompare(b.xMin));
+  const merged: OutageZone[] = [{ ...sorted[0] }];
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1];
+    const gap = new Date(sorted[i].xMin).getTime() - new Date(last.xMax).getTime();
+    if (gap < 60_000) {
+      last.xMax = sorted[i].xMax;
+      last.ongoing = last.ongoing || sorted[i].ongoing;
+    } else {
+      merged.push({ ...sorted[i] });
+    }
+  }
+  return merged;
 }
 
 function formatDuration(ms: number): string {
