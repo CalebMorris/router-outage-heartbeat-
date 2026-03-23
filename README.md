@@ -108,7 +108,7 @@ npm run analyze                              # Outage summary report (default)
 npm run analyze -- --mode request            # All probe events
 npm run analyze -- --mode outage             # Only probes during outage windows
 npm run analyze -- --format csv              # CSV output for spreadsheet import
-npm run analyze -- --format csv > report.csv # Save CSV to file
+npm run --silent analyze -- --format csv > report.csv # Save CSV to file (--silent suppresses npm banner)
 npm run analyze -- --since 2026-03-01        # Filter by date
 ```
 

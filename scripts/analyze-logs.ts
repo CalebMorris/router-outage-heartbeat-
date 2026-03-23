@@ -199,7 +199,7 @@ function printSummaryMode(entries: LogEntry[], format: 'text' | 'csv'): void {
     );
   }
 
-  outages.sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime());
+  outages.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
   const completed = outages.filter((o): o is OutageRecord & { durationMs: number } => o.durationMs !== null);
   const totalMs = completed.reduce((sum, o) => sum + o.durationMs, 0);
