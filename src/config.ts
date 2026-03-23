@@ -16,7 +16,7 @@ export interface Config {
 }
 
 export const CONFIG: Config = {
-  normalIntervalMs: 10_000,
+  normalIntervalMs: 5_000,
   outageIntervalMs: 100,
   consecutiveSuccessesForRecovery: 5,
   pingTimeoutMs: 1_000,
