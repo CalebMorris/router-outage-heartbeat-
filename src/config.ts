@@ -13,6 +13,10 @@ export interface Config {
   pingTimeoutMs: number;
   endpoints: Endpoint[];
   logPath: string;
+  endpointQuarantineInitialBackoffMs: number;
+  endpointQuarantineMaxBackoffMs: number;
+  endpointQuarantineBackoffMultiplier: number;
+  minActiveEndpoints: number;
 }
 
 export const CONFIG: Config = {
@@ -20,6 +24,10 @@ export const CONFIG: Config = {
   outageIntervalMs: 100,
   consecutiveSuccessesForRecovery: 5,
   pingTimeoutMs: 1_000,
+  endpointQuarantineInitialBackoffMs: 60_000,
+  endpointQuarantineMaxBackoffMs: 3_600_000,
+  endpointQuarantineBackoffMultiplier: 2,
+  minActiveEndpoints: 20,
   endpoints: [
     // Google DNS
     { host: '8.8.8.8',         port: 53  },

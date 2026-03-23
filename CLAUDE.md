@@ -12,9 +12,19 @@ Runs as a systemd user service. Pings external endpoints, switches to rapid poll
 
 ## Key Design Patterns
 - State machine in `src/state-machine.ts` is the central logic — everything feeds into it
+- Monitor loop lives in `src/monitor.ts` (`Monitor` class with injected `probe`/`log` deps); `src/index.ts` is a thin bootstrap
 - Config in `src/config.ts` is the single source of truth for all tunable values
 - Log events are typed in `src/logger.ts`; adding a new event type requires updating the discriminated union
-- Outage requires 2 consecutive failures (not 1) to avoid false positives from a single flaky endpoint
+- Outage requires a majority of active endpoints to fail the bulkhead check (not 1) to avoid false positives
+- Endpoint health is tracked in `src/endpoint-health.ts` (`EndpointHealth` class); flaky individual endpoints are quarantined separately from router-wide outage detection
+
+## Endpoint Quarantine
+- When a bulkhead check reveals a minority of endpoints failing, those endpoints are quarantined (removed from rotation)
+- Quarantined endpoints are rechecked on exponential backoff (1m → 2m → … → 60m max) via their own independent `setTimeout` chains — NOT in the main tick — to avoid blowing the 100ms outage polling budget
+- 1 successful recheck restores an endpoint to rotation
+- Quarantined endpoints are excluded from the majority-failed calculation in future bulkhead checks
+- `minActiveEndpoints` (default: 20) is a floor: quarantine is skipped if it would drop the active pool below this threshold
+- Graph shows currently unhealthy endpoints in an "Unhealthy Endpoints" section below the chart
 
 ## Running Locally
 npm run dev         # ts-node, logs to stdout
@@ -36,6 +46,14 @@ npm run graph                          # static HTML file (heartbeat-graph.html 
 npm run graph -- --since 2026-03-01    # filtered range
 npm run graph -- --out /tmp/out.html   # custom output path
 npm run live                           # live mode: opens /tmp/heartbeat-live.html, regenerates every 60s
+
+## Testing
+npm test            # run Jest test suite (31 tests)
+
+- Unit tests: `tests/unit/` — covers `StateMachine`, `EndpointHealth`, `EndpointRotator`
+- Integration tests: `tests/integration/` — covers full Monitor timing/behavior with fake timers
+- Uses Jest 29 with `jest.runAllTimersAsync()` to correctly handle `setTimeout` + `Promise.all` interleaving
+- `tsconfig.test.json` extends the main tsconfig to include `tests/**/*`
 
 ## Scripts Architecture
 - All scripts in `scripts/` run via `ts-node` directly — they are NOT compiled by `tsc` (`tsconfig.json` only includes `src/**/*`)

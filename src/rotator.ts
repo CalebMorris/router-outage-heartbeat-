@@ -9,9 +9,32 @@ export class EndpointRotator {
     }
   }
 
-  public next(): Endpoint {
-    const endpoint = this.endpoints[this.cursor];
-    this.cursor = (this.cursor + 1) % this.endpoints.length;
-    return endpoint;
+  public next(quarantined?: Set<string>): Endpoint {
+    if (!quarantined || quarantined.size === 0) {
+      const endpoint = this.endpoints[this.cursor];
+      this.cursor = (this.cursor + 1) % this.endpoints.length;
+      return endpoint;
+    }
+
+    // Find the next non-quarantined endpoint, advancing cursor past skipped ones.
+    const total = this.endpoints.length;
+    let found: Endpoint | null = null;
+    for (let i = 0; i < total; i++) {
+      const candidate = this.endpoints[this.cursor];
+      this.cursor = (this.cursor + 1) % total;
+      if (!quarantined.has(`${candidate.host}:${candidate.port}`)) {
+        found = candidate;
+        break;
+      }
+    }
+
+    // Safety valve: if all endpoints are quarantined, fall back to unfiltered rotation.
+    if (found === null) {
+      const endpoint = this.endpoints[this.cursor];
+      this.cursor = (this.cursor + 1) % total;
+      return endpoint;
+    }
+
+    return found;
   }
 }

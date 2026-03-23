@@ -53,7 +53,23 @@ export interface StartupHealthCheckEvent {
   allHealthy: boolean;
 }
 
-export type LogEvent = ProbeEvent | BulkheadCheckEvent | OutageStartEvent | OutageEndEvent | StartupEvent | ShutdownEvent | StartupHealthCheckEvent;
+export interface EndpointQuarantinedEvent {
+  event: 'endpoint_quarantined';
+  host: string;
+  port: number;
+  backoffMs: number;
+}
+
+export interface EndpointRestoredEvent {
+  event: 'endpoint_restored';
+  host: string;
+  port: number;
+  quarantinedAt: string;
+  restoredAt: string;
+  durationMs: number;
+}
+
+export type LogEvent = ProbeEvent | BulkheadCheckEvent | OutageStartEvent | OutageEndEvent | StartupEvent | ShutdownEvent | StartupHealthCheckEvent | EndpointQuarantinedEvent | EndpointRestoredEvent;
 
 let logger: pino.Logger;
 let productionStream: ReturnType<typeof pino.destination> | null = null;

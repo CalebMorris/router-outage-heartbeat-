@@ -47,7 +47,7 @@ interface BulkheadCheckEntry {
   failedEndpoints?: Array<{ host: string; port: number }>;
 }
 
-type LogEntry = ProbeEntry | OutageStartEntry | OutageEndEntry | BulkheadCheckEntry | { time: string; event: string; [key: string]: unknown };
+type LogEntry = ProbeEntry | OutageStartEntry | OutageEndEntry | BulkheadCheckEntry | EndpointQuarantinedEntry | EndpointRestoredEntry | { time: string; event: string; [key: string]: unknown };
 
 interface OutageZone {
   xMin: string;
@@ -61,6 +61,31 @@ interface PartialFailureZone {
   failedCount: number;
   totalEndpoints: number;
   failedEndpoints: Array<{ host: string; port: number }>;
+}
+
+interface QuarantineZone {
+  host: string;
+  port: number;
+  quarantinedAt: string;
+  restoredAt: string | null; // null = still quarantined
+}
+
+interface EndpointQuarantinedEntry {
+  time: string;
+  event: 'endpoint_quarantined';
+  host: string;
+  port: number;
+  backoffMs: number;
+}
+
+interface EndpointRestoredEntry {
+  time: string;
+  event: 'endpoint_restored';
+  host: string;
+  port: number;
+  quarantinedAt: string;
+  restoredAt: string;
+  durationMs: number;
 }
 
 interface Args {
@@ -147,11 +172,13 @@ function buildDatasets(entries: LogEntry[]): {
   failurePoints: { x: string; y: number; host: string; port: number }[];
   outageZones: OutageZone[];
   partialFailureZones: PartialFailureZone[];
+  quarantineZones: QuarantineZone[];
 } {
   const successPoints: { x: string; y: number; host: string; port: number }[] = [];
   const failurePoints: { x: string; y: number; host: string; port: number }[] = [];
   const outageZones: OutageZone[] = [];
   const partialFailureZones: PartialFailureZone[] = [];
+  const quarantineMap = new Map<string, QuarantineZone>();
   const pendingStarts = new Map<string, string>();
 
   for (const entry of entries) {
@@ -174,6 +201,23 @@ function buildDatasets(entries: LogEntry[]): {
       if (!e.majorityFailed && e.failedCount > 0) {
         partialFailureZones.push({ xMin: e.time, xMax: e.time, failedCount: e.failedCount, totalEndpoints: e.totalEndpoints, failedEndpoints: e.failedEndpoints ?? [] });
       }
+    } else if (entry.event === 'endpoint_quarantined') {
+      const e = entry as EndpointQuarantinedEntry;
+      const key = `${e.host}:${e.port}:${e.time}`;
+      quarantineMap.set(key, { host: e.host, port: e.port, quarantinedAt: e.time, restoredAt: null });
+    } else if (entry.event === 'endpoint_restored') {
+      const e = entry as EndpointRestoredEntry;
+      // Match to the most recent open quarantine entry for this endpoint
+      let matchKey: string | null = null;
+      let matchTime = '';
+      for (const [k, z] of quarantineMap) {
+        if (z.host === e.host && z.port === e.port && z.restoredAt === null) {
+          if (z.quarantinedAt > matchTime) { matchTime = z.quarantinedAt; matchKey = k; }
+        }
+      }
+      if (matchKey !== null) {
+        quarantineMap.get(matchKey)!.restoredAt = e.restoredAt;
+      }
     }
   }
 
@@ -182,7 +226,8 @@ function buildDatasets(entries: LogEntry[]): {
     outageZones.push({ xMin: startedAt, xMax: new Date().toISOString(), ongoing: true });
   }
 
-  return { successPoints, failurePoints, outageZones, partialFailureZones };
+  const quarantineZones = Array.from(quarantineMap.values());
+  return { successPoints, failurePoints, outageZones, partialFailureZones, quarantineZones };
 }
 
 function formatDuration(ms: number): string {
@@ -201,11 +246,12 @@ function buildHtml(params: {
   failurePoints: { x: string; y: number }[];
   outageZones: OutageZone[];
   partialFailureZones: PartialFailureZone[];
+  quarantineZones: QuarantineZone[];
   since: Date | null;
   generatedAt: string;
   live: boolean;
 }): string {
-  const { successPoints, failurePoints, outageZones, partialFailureZones, since, generatedAt, live } = params;
+  const { successPoints, failurePoints, outageZones, partialFailureZones, quarantineZones, since, generatedAt, live } = params;
   const sinceText = since ? `since ${since.toISOString().slice(0, 10)}` : 'all time';
 
   const outageListHtml = outageZones.length === 0 ? '' : (() => {
@@ -254,6 +300,31 @@ ${rows}
     </table>
   </section>
   <script>document.querySelectorAll('.degraded-time[data-iso]').forEach(function(el){el.textContent=new Date(el.dataset.iso).toLocaleString();});<\/script>`;
+  })();
+
+  const unhealthyEndpoints = quarantineZones.filter((z) => z.restoredAt === null)
+    .sort((a, b) => new Date(b.quarantinedAt).getTime() - new Date(a.quarantinedAt).getTime());
+  const endpointHealthHtml = unhealthyEndpoints.length === 0 ? '' : (() => {
+    const rows = unhealthyEndpoints.map((z) => {
+      return `      <tr><td class="quarantine-endpoint">${z.host}:${z.port}</td><td class="quarantine-time" data-iso="${z.quarantinedAt}"></td><td class="quarantine-duration quarantine-ongoing" data-quarantined-at="${z.quarantinedAt}"></td></tr>`;
+    }).join('\n');
+    return `
+  <section class="quarantine-list">
+    <h2>Unhealthy Endpoints (${unhealthyEndpoints.length})</h2>
+    <table>
+      <thead><tr><th>Endpoint</th><th>Quarantined At</th><th>For</th></tr></thead>
+      <tbody>
+${rows}
+      </tbody>
+    </table>
+  </section>
+  <script>
+    document.querySelectorAll('.quarantine-time[data-iso]').forEach(function(el){el.textContent=new Date(el.dataset.iso).toLocaleString();});
+    document.querySelectorAll('.quarantine-duration[data-quarantined-at]').forEach(function(el){
+      function tick(){var ms=Date.now()-new Date(el.dataset.quarantinedAt).getTime();var s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60);el.textContent=h>0?(h+'h '+(m%60>0?m%60+'m':'')):m>0?(m+'m '+(s%60>0?s%60+'s':'')):s+'s';}
+      tick(); setInterval(tick,10000);
+    });
+  <\/script>`;
   })();
 
   const legendHtml = `
@@ -311,6 +382,14 @@ ${rows}
     .degraded-list tbody tr.hovered { background: rgba(234,179,8,0.15); outline: 1px solid rgba(234,179,8,0.5); }
     .chart-legend { display: flex; gap: 20px; margin-top: 12px; font-size: 0.8rem; color: #94a3b8; align-items: center; }
     .chart-legend-swatch { display: inline-block; width: 16px; height: 12px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+    .quarantine-list { }
+    .quarantine-list h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #e2e8f0; }
+    .quarantine-list table { border-collapse: collapse; font-size: 0.85rem; width: auto; }
+    .quarantine-list th { text-align: left; padding: 4px 16px 4px 0; color: #94a3b8; font-weight: 500; border-bottom: 1px solid rgba(148,163,184,0.2); }
+    .quarantine-list td { padding: 5px 16px 5px 0; color: #e2e8f0; border-bottom: 1px solid rgba(148,163,184,0.08); }
+    .quarantine-endpoint { font-family: monospace; font-size: 0.8rem; color: #94a3b8; }
+    .quarantine-ongoing { color: #f59e0b; }
+    .quarantine-duration { font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
@@ -325,6 +404,7 @@ ${rows}
   <div class="lists-row">
     ${outageListHtml}
     ${degradedListHtml}
+    ${endpointHealthHtml}
   </div>
   <script>
     const outageZones = ${outageZonesJson};
@@ -548,12 +628,13 @@ async function generate(logPath: string, since: Date | null, outPath: string, li
     console.error(`Warning: ${skippedLines} malformed line(s) skipped.`);
   }
 
-  const { successPoints, failurePoints, outageZones, partialFailureZones } = buildDatasets(entries);
+  const { successPoints, failurePoints, outageZones, partialFailureZones, quarantineZones } = buildDatasets(entries);
   const html = buildHtml({
     successPoints,
     failurePoints,
     outageZones,
     partialFailureZones,
+    quarantineZones,
     since,
     generatedAt: new Date().toISOString(),
     live,

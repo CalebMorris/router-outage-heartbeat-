@@ -7,11 +7,12 @@ A background daemon that detects and logs internet outages for ISP reporting. It
 ## How it works
 
 - Probes external endpoints in round-robin on a regular interval
-- On the first probe failure, enters **bulkhead mode**: immediately pings every endpoint in parallel
+- On the first probe failure, enters **bulkhead mode**: immediately pings every active endpoint in parallel
 - If a majority of those endpoints fail, declares an outage and switches to rapid polling
-- If a majority succeed, the single failure is treated as noise and normal polling resumes
+- If a minority fail, the failing endpoints are **quarantined** — removed from rotation and rechecked on exponential backoff (1m → 2m → … → 60m). Once a recheck succeeds, the endpoint is restored
+- If a majority succeed (false alarm), normal polling resumes immediately
 - When enough consecutive probes succeed after an outage, declares recovery and returns to normal intervals
-- All probe results and outage events are written as JSON to a log file
+- All probe results, outage events, and endpoint health events are written as JSON to a log file
 
 ---
 
@@ -95,9 +96,11 @@ Each line is a JSON event. Event types:
 | `startup` | Service started |
 | `shutdown` | Service stopped gracefully |
 | `probe` | Every ping attempt (includes `state: normal\|bulkhead\|outage`) |
-| `bulkhead_check` | All endpoints blasted in parallel after first failure (includes `totalEndpoints`, `failedCount`, `majorityFailed`) |
-| `outage_start` | Bulkhead check confirmed majority of endpoints unreachable |
+| `bulkhead_check` | Active endpoints blasted in parallel after first failure (includes `totalEndpoints`, `failedCount`, `majorityFailed`) |
+| `outage_start` | Bulkhead check confirmed majority of active endpoints unreachable |
 | `outage_end` | Consecutive successes threshold reached after an outage (includes `durationMs`) |
+| `endpoint_quarantined` | An endpoint failed bulkhead check (minority) and was removed from rotation (includes `backoffMs`) |
+| `endpoint_restored` | A quarantined endpoint passed its recheck and returned to rotation (includes `durationMs`) |
 
 ---
 
@@ -133,6 +136,8 @@ The chart shows:
 - **Blue dots** — successful probes with their TCP latency in ms
 - **Red × marks** — failed probes (plotted at 0 ms)
 - **Red shaded bands** — outage windows (outage_start → outage_end)
+- **Yellow lines** — degraded checks (partial failure, minority of endpoints failed)
+- **Unhealthy Endpoints table** — endpoints currently quarantined, with how long they've been down
 
 Open the generated HTML file in any browser. No internet connection required to view it — Chart.js loads from CDN and the data is embedded inline.
 
@@ -148,11 +153,15 @@ npm run build && npm run service:restart
 
 | Setting | Default | Description |
 |---|---|---|
-| `normalIntervalMs` | ms | Probe interval during normal operation |
-| `outageIntervalMs` | ms | Probe interval during an outage |
-| `consecutiveSuccessesForRecovery` | count | Successes required to declare recovery |
-| `pingTimeoutMs` | ms | Per-probe TCP timeout |
+| `normalIntervalMs` | 5s | Probe interval during normal operation |
+| `outageIntervalMs` | 100ms | Probe interval during an outage |
+| `consecutiveSuccessesForRecovery` | 5 | Successes required to declare recovery |
+| `pingTimeoutMs` | 1s | Per-probe TCP timeout |
 | `endpoints` | list | Endpoints to probe in round-robin |
+| `endpointQuarantineInitialBackoffMs` | 1m | First recheck delay for a quarantined endpoint |
+| `endpointQuarantineMaxBackoffMs` | 1h | Maximum recheck delay |
+| `endpointQuarantineBackoffMultiplier` | 2 | Backoff multiplier per failed recheck |
+| `minActiveEndpoints` | 20 | Minimum active pool size — quarantine is skipped if this floor would be breached |
 
 **To test outage detection without unplugging:** temporarily replace most entries in `endpoints` with `{ host: 'localhost', port: 9999 }`, rebuild, and restart. The first probe failure will trigger a bulkhead check; since the majority of endpoints are unreachable, it will immediately declare an outage. Restore the original list and restart when done.
 
@@ -164,4 +173,5 @@ npm run build && npm run service:restart
 npm run dev     # Run with ts-node, logs to stdout
 npm run build   # Compile TypeScript to dist/
 npm run lint    # Run ESLint
+npm test        # Run Jest test suite
 ```
