@@ -48,12 +48,13 @@ npm run graph -- --out /tmp/out.html   # custom output path
 npm run live                           # live mode: opens /tmp/heartbeat-live.html, regenerates every 60s
 
 ## Testing
-npm test            # run Jest test suite (31 tests)
+npm test            # run Jest test suite
 
-- Unit tests: `tests/unit/` — covers `StateMachine`, `EndpointHealth`, `EndpointRotator`
+- Unit tests: `tests/unit/` — covers `StateMachine`, `EndpointHealth`, `EndpointRotator`, `graph-logs`
 - Integration tests: `tests/integration/` — covers full Monitor timing/behavior with fake timers
-- Uses Jest 29 with `jest.runAllTimersAsync()` to correctly handle `setTimeout` + `Promise.all` interleaving
-- `tsconfig.test.json` extends the main tsconfig to include `tests/**/*`
+- Uses Jest 29 with `jest.advanceTimersByTimeAsync()` to correctly handle `setTimeout` + `Promise.all` interleaving
+- `tsconfig.test.json` extends the main tsconfig to include `tests/**/*` and `scripts/**/*`
+- Scripts that need tests must export their key functions and guard auto-run with `if (require.main === module)`; Node built-ins (`fs`, `readline`, `child_process`) must be mocked at module level via `jest.mock(...)` factory — `jest.spyOn` fails on non-configurable properties
 
 ## Scripts Architecture
 - All scripts in `scripts/` run via `ts-node` directly — they are NOT compiled by `tsc` (`tsconfig.json` only includes `src/**/*`)

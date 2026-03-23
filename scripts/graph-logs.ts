@@ -96,7 +96,7 @@ interface Args {
   live: boolean;
 }
 
-function parseArgs(): Args {
+export function parseArgs(): Args {
   const args = process.argv.slice(2);
   let logPath = DEFAULT_LOG_PATH;
   let since: Date | null = null;
@@ -649,7 +649,7 @@ async function generate(logPath: string, since: Date | null, outPath: string, li
   }
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const { logPath, since, outPath, open, live } = parseArgs();
 
   await generate(logPath, since, outPath, live);
@@ -666,15 +666,16 @@ async function main(): Promise<void> {
   if (live) {
     console.log('Watching — regenerating every 60s. Press Ctrl+C to stop.');
     setInterval((): void => {
-      const liveSince = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      generate(logPath, liveSince, outPath, true).catch((err: unknown) => {
+      generate(logPath, since, outPath, true).catch((err: unknown) => {
         console.error('Regeneration failed:', err);
       });
     }, 60_000);
   }
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
