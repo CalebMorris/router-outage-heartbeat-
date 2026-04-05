@@ -360,9 +360,16 @@ ${rows}
   const successJson = JSON.stringify(successPoints);
   const failureJson = JSON.stringify(failurePoints);
   const metaRefresh = live ? `\n  <meta http-equiv="refresh" content="60">` : '';
+  const totalOutageMs = outageZones.reduce((sum, z) => {
+    const end = z.ongoing ? Date.now() : new Date(z.xMax).getTime();
+    return sum + (end - new Date(z.xMin).getTime());
+  }, 0);
+  const totalOutageSuffix = outageZones.length > 0
+    ? ` &middot; ${formatDuration(totalOutageMs)} total`
+    : '';
   const metaLine = live
-    ? `Live · last 24h · updated ${generatedAt.slice(11, 19)} UTC &middot; ${totalProbes.toLocaleString()} probes &middot; ${outageZones.length} outage(s)`
-    : `Generated: ${generatedAt} &middot; ${sinceText} &middot; ${totalProbes.toLocaleString()} probes &middot; ${outageZones.length} outage(s)`;
+    ? `Live · last 24h · updated ${generatedAt.slice(11, 19)} UTC &middot; ${totalProbes.toLocaleString()} probes &middot; ${outageZones.length} outage(s)${totalOutageSuffix}`
+    : `Generated: ${generatedAt} &middot; ${sinceText} &middot; ${totalProbes.toLocaleString()} probes &middot; ${outageZones.length} outage(s)${totalOutageSuffix}`;
   const title = live ? 'Heartbeat — Live' : `Heartbeat Graph — ${sinceText}`;
 
   return `<!DOCTYPE html>
